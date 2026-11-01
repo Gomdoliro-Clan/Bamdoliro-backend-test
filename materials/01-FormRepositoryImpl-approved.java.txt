@@ -1,0 +1,51 @@
+// === 01. 1차 선발 대상 조회 ===
+// 출처: marubase infrastructure/persistence/form/FormRepositoryImpl
+// 실제 서비스 코드에서 발췌했습니다. 이 과제 외의 용도로 사용하거나 외부에 공유하지 마세요.
+
+// ---- FormRepositoryImpl 발췌 ----
+    @Override
+    public List<Form> findApprovedSpecialForm() {
+        return queryFactory
+                .selectFrom(form)
+                .where(
+                        form.status.eq(FormStatus.APPROVED)
+                                .and(isSpecialType())
+                )
+                .orderBy(form.score.firstRoundScore.desc())
+                .fetch();
+    }
+
+    @Override
+    public List<Form> findApprovedRegularForm() {
+        return queryFactory
+                .selectFrom(form)
+                .where(
+                        form.status.eq(FormStatus.APPROVED)
+                                .and(isRegularType())
+                )
+                .orderBy(form.score.firstRoundScore.desc())
+                .fetch();
+    }
+
+    @Override
+    public List<Form> findApprovedSupernumeraryForm() {
+        return queryFactory
+                .selectFrom(form)
+                .where(
+                        form.status.eq(FormStatus.APPROVED)
+                                .and(isSupernumeraryType())
+                )
+                .orderBy(form.score.firstRoundScore.desc())
+                .fetch();
+    }
+
+// ---- Form 엔티티 발췌: 점수와 기본키 ----
+    @Column(name = "form_id")
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    private Long id;
+
+    @Embedded
+    private Score score;   // firstRoundScore: Double
+
+// (참고) 이 조회 결과를 materials/05 의 processForms 가 앞에서부터 차례로 처리합니다.

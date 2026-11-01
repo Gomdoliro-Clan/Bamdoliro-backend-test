@@ -1,0 +1,180 @@
+// === 05. 1차 선발 ===
+// 출처: marubase application/form,
+// 실제 서비스 코드에서 발췌했습니다. 이 과제 외의 용도로 사용하거나 외부에 공유하지 마세요.
+
+// ---- SelectFirstPassUseCase ----
+package com.bamdoliro.maru.application.form;
+
+import com.bamdoliro.maru.domain.form.domain.Form;
+import com.bamdoliro.maru.domain.form.domain.type.FormType;
+import com.bamdoliro.maru.domain.form.service.CalculateFormScoreService;
+import com.bamdoliro.maru.infrastructure.persistence.form.FormRepository;
+import com.bamdoliro.maru.shared.annotation.UseCase;
+import com.bamdoliro.maru.shared.constants.FixedNumber;
+import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+
+@RequiredArgsConstructor
+@UseCase
+public class SelectFirstPassUseCase {
+
+    private final FormRepository formRepository;
+    private final CalculateFormScoreService calculateFormScoreService;
+    @Transactional
+    public void execute() {
+        AtomicInteger otherRegionCount = new AtomicInteger(
+                (int) (calculateMultiple(FixedNumber.TOTAL) * FixedNumber.OTHER_REGION_RATE)
+        );
+
+        List<Form> specialFormList = formRepository.findApprovedSpecialForm();
+        List<Form> meisterTalentFormList = classifyFormsByType(specialFormList, FormType::isMeister);
+        List<Form> equalOpportunityFormList = classifyFormsByType(specialFormList, FormType::isEqualOpportunity);
+        List<Form> societyDiversityFormList = classifyFormsByType(specialFormList, FormType::isSocietyDiversity);
+
+        SelectionQuota quota = SelectionQuota.of(
+                meisterTalentFormList.size(),
+                equalOpportunityFormList.size(),
+                societyDiversityFormList.size(),
+                this::calculateMultiple
+        );
+
+        processForms(
+                equalOpportunityFormList,
+                quota.equalOpportunity(),
+                otherRegionCount,
+                this::changeToRegularAndCalculateGradeAgain
+        );
+        processForms(
+                societyDiversityFormList,
+                quota.societyDiversity(),
+                otherRegionCount,
+                this::changeToRegularAndCalculateGradeAgain
+        );
+        processForms(
+                meisterTalentFormList,
+                quota.meisterTalent(),
+                otherRegionCount,
+                this::changeToRegularAndCalculateGradeAgain
+        );
+
+        formRepository.flush();
+        List<Form> regularFormList = formRepository.findApprovedRegularForm();
+
+        processForms(regularFormList, quota.regular(), otherRegionCount, Form::firstFail);
+
+        formRepository.flush();
+        List<Form> supernumeraryFormList = formRepository.findApprovedSupernumeraryForm();
+        List<Form> nationalVeteransFormList = classifyFormsByType(
+                supernumeraryFormList,
+                FormType::isNationalVeteransEducation
+        );
+        List<Form> specialAdmissionFormList = classifyFormsByType(
+                supernumeraryFormList,
+                FormType::isSpecialAdmission
+        );
+
+        processForms(
+                nationalVeteransFormList,
+                quota.nationalVeteransEducation(),
+                otherRegionCount,
+                Form::firstFail
+        );
+        processForms(specialAdmissionFormList, quota.specialAdmission(), otherRegionCount, Form::firstFail);
+    }
+
+    private void processForms(
+            List<Form> formList,
+            int count,
+            AtomicInteger otherRegionCount,
+            Consumer<Form> action
+    ) {
+        if (formList.isEmpty())
+            return;
+
+        if (count <= 0) {
+            formList.forEach(action);
+            return;
+        }
+
+        Double lastScore = formList.get(Math.min(count, formList.size()) - 1).getScore().getFirstRoundScore();
+
+        for (Form form : formList) {
+            if (count > 0) {
+                if (form.getEducation().getSchool().isBusan()) {
+                    form.firstPass();
+                    count--;
+                } else if (otherRegionCount.intValue() > 0) {
+                    form.firstPass();
+                    otherRegionCount.getAndDecrement();
+                    count--;
+                } else {
+                    action.accept(form);
+                }
+            } else if (form.getScore().getFirstRoundScore().equals(lastScore)) {
+                form.firstPass();
+            } else {
+                action.accept(form);
+            }
+        }
+    }
+
+    private void changeToRegularAndCalculateGradeAgain(Form form) {
+        form.changeToRegularFirstRound(calculateFormScoreService);
+    }
+
+    private List<Form> classifyFormsByType(List<Form> formList, FormTypeFilter filter) {
+        return formList.stream()
+                .filter(form -> filter.execute(form.getType()))
+                .toList();
+    }
+
+    private int calculateMultiple(int count) {
+        return (int) Math.ceil(count * FixedNumber.MULTIPLE);
+    }
+}
+
+@FunctionalInterface
+interface FormTypeFilter {
+    boolean execute(FormType type);
+}
+
+// ---- FormRepositoryImpl 발췌 ----
+    @Override
+    public List<Form> findApprovedSpecialForm() {
+        return queryFactory
+                .selectFrom(form)
+                .where(
+                        form.status.eq(FormStatus.APPROVED)
+                                .and(isSpecialType())
+                )
+                .orderBy(form.score.firstRoundScore.desc())
+                .fetch();
+    }
+
+    @Override
+    public List<Form> findApprovedRegularForm() {
+        return queryFactory
+                .selectFrom(form)
+                .where(
+                        form.status.eq(FormStatus.APPROVED)
+                                .and(isRegularType())
+                )
+                .orderBy(form.score.firstRoundScore.desc())
+                .fetch();
+    }
+
+    @Override
+    public List<Form> findApprovedSupernumeraryForm() {
+        return queryFactory
+                .selectFrom(form)
+                .where(
+                        form.status.eq(FormStatus.APPROVED)
+                                .and(isSupernumeraryType())
+                )
+                .orderBy(form.score.firstRoundScore.desc())
+                .fetch();
+    }

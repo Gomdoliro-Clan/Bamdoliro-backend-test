@@ -1,0 +1,85 @@
+// === 06. 수험번호 발급 ===
+// 출처: marubase domain/form/service
+// 실제 서비스 코드에서 발췌했습니다. 이 과제 외의 용도로 사용하거나 외부에 공유하지 마세요.
+
+// ---- AssignExaminationNumberService ----
+package com.bamdoliro.maru.domain.form.service;
+
+import com.bamdoliro.maru.domain.form.domain.Form;
+import com.bamdoliro.maru.domain.form.domain.type.FormType;
+import com.bamdoliro.maru.infrastructure.persistence.form.FormRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+@RequiredArgsConstructor
+@Service
+public class AssignExaminationNumberService {
+
+    private final FormRepository formRepository;
+
+    public void execute(Form form) {
+        Long examinationNumber = getNextExaminationNumber(form.getType());
+        form.assignExaminationNumber(examinationNumber);
+    }
+
+    private Long getNextExaminationNumber(FormType type) {
+        Long startNumber = getStartNumber(type);
+        return formRepository.findAllExaminationNumber().stream()
+                .filter(num -> num >= startNumber && num <= startNumber + 1000)
+                .max(Long::compareTo)
+                .orElse(startNumber) + 1;
+    }
+
+    private Long getStartNumber(FormType type) {
+        return switch (type.getCategory()) {
+            case REGULAR -> 1000L;
+            case MEISTER_TALENT -> 2000L;
+            case SOCIAL_INTEGRATION -> 3000L;
+            case SUPERNUMERARY -> 4000L;
+            default -> 0L;
+        };
+    }
+}
+
+// ---- FormRepositoryImpl 발췌 ----
+    @Override
+    public List<Long> findAllExaminationNumber() {
+        return queryFactory
+                .select(form.examinationNumber)
+                .from(form)
+                .fetch();
+    }
+
+// ---- Form 엔티티 발췌: 수험번호 필드 ----
+    @Convert(converter = LongEncryptedConverter.class)
+    @Column(nullable = true, unique = true)
+    private Long examinationNumber;
+
+// ---- 암호화 컨버터 ----
+package com.bamdoliro.maru.infrastructure.persistence.converter;
+
+import com.bamdoliro.maru.infrastructure.persistence.converter.mapper.DecryptionMapper;
+import jakarta.persistence.AttributeConverter;
+import lombok.RequiredArgsConstructor;
+import org.jasypt.encryption.StringEncryptor;
+
+@RequiredArgsConstructor
+public class GenericEncryptedConverter<T> implements AttributeConverter<T, String> {
+
+    private final StringEncryptor encryptor;
+    private final DecryptionMapper<T> decryptionMapper;
+
+    @Override
+    public String convertToDatabaseColumn(T attribute) {
+        if (attribute == null) return null;
+        return encryptor.encrypt(attribute.toString());
+    }
+
+    @Override
+    public T convertToEntityAttribute(String dbData) {
+        if (dbData == null) return null;
+        return decryptionMapper.map(encryptor.decrypt(dbData));
+    }
+}
+
+// (참고) 암호화에는 고정 salt 를 쓰는 PBE 알고리즘이 사용되어, 같은 값은 항상 같은 암호문이 됩니다.

@@ -1,0 +1,81 @@
+// === 02. 원서 제출 ===
+// 출처: marubase application/form,
+// 실제 서비스 코드에서 발췌했습니다. 이 과제 외의 용도로 사용하거나 외부에 공유하지 마세요.
+
+// ---- SubmitFormUseCase ----
+package com.bamdoliro.maru.application.form;
+
+import com.bamdoliro.maru.domain.form.domain.Form;
+import com.bamdoliro.maru.domain.form.exception.FormAlreadySubmittedException;
+import com.bamdoliro.maru.domain.form.service.AssignExaminationNumberService;
+import com.bamdoliro.maru.domain.form.service.CalculateFormScoreService;
+import com.bamdoliro.maru.domain.user.domain.User;
+import com.bamdoliro.maru.infrastructure.persistence.form.FormRepository;
+import com.bamdoliro.maru.presentation.form.dto.request.SubmitFormRequest;
+import com.bamdoliro.maru.shared.annotation.UseCase;
+import com.bamdoliro.maru.shared.annotation.ValidateApplicationFormPeriod;
+import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Optional;
+
+@RequiredArgsConstructor
+@UseCase
+public class SubmitFormUseCase {
+
+    private final FormRepository formRepository;
+    private final CalculateFormScoreService calculateFormScoreService;
+    private final AssignExaminationNumberService assignExaminationNumberService;
+
+    @ValidateApplicationFormPeriod
+    @Transactional
+    public void execute(User user, SubmitFormRequest request) {
+        GradeRequestValidator.validate(request.getEducation(), request.getGrade());
+        validateOnlyOneFormPerUser(user);
+
+        Form form = Form.builder()
+                .applicant(request.getApplicant().toValue())
+                .parent(request.getParent().toValue())
+                .education(request.getEducation().toValue())
+                .grade(request.getGrade().toValue())
+                .document(request.getDocument().toValue())
+                .type(request.getType())
+                .user(user)
+                .build();
+
+        calculateFormScoreService.execute(form);
+        assignExaminationNumberService.execute(form);
+        formRepository.save(form);
+    }
+
+    private void validateOnlyOneFormPerUser(User user) {
+        Optional<Form> form = formRepository.findByUser(user);
+        if (form.isPresent()) {
+            throw new FormAlreadySubmittedException();
+        }
+    }
+}
+
+// ---- Form (엔티티) 발췌: 필드 일부 ----
+@Table(name = "tbl_form")
+@Entity
+public class Form extends BaseTimeEntity {
+
+    @Column(name = "form_id")
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    private Long id;
+
+    @Convert(converter = LongEncryptedConverter.class)
+    @Column(nullable = true, unique = true)
+    private Long examinationNumber;
+
+    @Embedded
+    // ... (중략) ...
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private FormStatus status;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(nullable = false, name = "user_id")
+    private User user;

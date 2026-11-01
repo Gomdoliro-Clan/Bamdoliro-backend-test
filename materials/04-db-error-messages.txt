@@ -1,0 +1,25 @@
+// === 04. 원서 저장 시 DB 오류 ===
+// 출처: 운영과 같은 종류인 PostgreSQL 15 에서 재현한 오류 메시지와 테이블 정의 발췌
+// (제약 이름은 과제용으로 바꿨습니다. 실제 환경의 이름은 다릅니다.)
+// 이 과제 외의 용도로 사용하거나 외부에 공유하지 마세요.
+
+-- tbl_form 의 제약 (발췌)
+PRIMARY KEY (form_id)
+UNIQUE (user_id)                 -- 이름: uk_form_user
+UNIQUE (examination_number)      -- 이름: uk_form_exam
+FOREIGN KEY (user_id) REFERENCES tbl_user(user_id)   -- 이름: fk_form_user
+
+-- (1) 같은 사용자가 원서를 한 번 더 INSERT 할 때
+ERROR:  duplicate key value violates unique constraint "uk_form_user"
+DETAIL:  Key (user_id)=(1234) already exists.
+
+-- (2) 같은 수험번호를 두 요청이 INSERT 할 때
+ERROR:  duplicate key value violates unique constraint "uk_form_exam"
+DETAIL:  Key (examination_number)=(<암호문>) already exists.
+
+-- (3) 존재하지 않는 사용자로 INSERT 할 때
+ERROR:  insert or update on table "tbl_form" violates foreign key constraint "fk_form_user"
+DETAIL:  Key (user_id)=(99999) is not present in table "tbl_user".
+
+// (참고) 세 오류 모두 Spring 에서는 DataIntegrityViolationException 으로 변환되어 올라옵니다.
+// 서비스에는 이미 DataIntegrityViolationException 을 HTTP 409 로 응답하는 전역 예외 처리기가 있습니다.
